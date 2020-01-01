@@ -7,4 +7,5 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-opencv = "0.28"
+opencv = {version = "0.28", default-features = false, features = ["opencv-34", "contrib"]}
+gpio-cdev = "0.2"
