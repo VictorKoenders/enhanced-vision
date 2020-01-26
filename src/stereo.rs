@@ -60,6 +60,12 @@ impl StereoView {
         Ok(())
     }
 
+    pub fn get_view_size(&self) -> opencv::Result<[f64; 2]> {
+        let width = self.left.get(videoio::CAP_PROP_FRAME_WIDTH)?;
+        let height = self.left.get(videoio::CAP_PROP_FRAME_HEIGHT)?;
+        Ok([width, height])
+    }
+
     pub fn test_cams(&mut self) -> opencv::Result<()> {
         use opencv::highgui;
         
@@ -77,10 +83,10 @@ impl StereoView {
             self.right.read(&mut right)?;
             
             if left.size()?.width > 0 {
-                highgui::imshow(left_title, &mut left)?;
+                highgui::imshow(left_title, &left)?;
             }
             if right.size()?.width > 0 {
-                highgui::imshow(right_title, &mut right)?;
+                highgui::imshow(right_title, &right)?;
             }
             println!("width: {}, height: {}", right.size()?.width, right.size()?.height);
             if highgui::wait_key(10)? > 0 {

@@ -28,7 +28,7 @@ impl CollisionDetector {
     }
 
     //origin is the location where the distance sensor measures
-    pub fn feed_depth_map(&mut self, depth_map: &core::Mat, origin_value: f64, origin_depth: f64) -> opencv::Result<()> {
+    pub fn feed_depth_map(&mut self, depth_map: &core::Mat, origin_value: f64, origin_depth: f64) -> opencv::Result<Option<CollisionInfo>> {
         //find_contours is made to detect white-on-black contours, so do an edge detection first
         let mut visual = Mat::default()?;
         //CV_U8 not defined for some reason... need to convert because canny expects an 8 bit single channel image
@@ -56,28 +56,23 @@ impl CollisionDetector {
             for old in &self.previous_shapes {
                 //if shape is 95% similar or better
                 if imgproc::match_shapes(&old.shape, &new.shape, imgproc::CONTOURS_MATCH_I1, 0.0)? >= 0.95 {
-                    let result = self.test_collision(old, &new);
-                    //collision
-                    if result >= 0.0 {
-                        //to be handled
-                    }
-                    break;
+                    return Ok(self.test_collision(old, &new));
                 }
             }
         }
 
-        Ok(())
+        Ok(None)
     }
 
     //returns time in seconds until collision, negative if no collision
-    fn test_collision(&self, old: &ObjectInfo, new: &ObjectInfo) -> f64 {
+    fn test_collision(&self, old: &ObjectInfo, new: &ObjectInfo) -> Option<CollisionInfo> {
         let delta = old.timestamp.elapsed().as_secs_f64();
         let delta_x = (new.position.x - old.position.x) as f64 / delta;
         let delta_y = (new.position.y - old.position.y) as f64 / delta;
         let delta_z = (new.depth - old.depth) / delta;
         // if the object is standing still or moving away from the screen there is no way it would collide with us
         if delta_z >= 0.0 {
-            return -1.0;
+            return None;
         }
 
         let t = 0.0;
@@ -99,12 +94,15 @@ impl CollisionDetector {
             
             //apparantely the object will stay inside our vision when it reaches depth 0, i.e. it hits the screen
             if z <= 0.0 {
-                return t;
+                return Some(CollisionInfo {
+                    time_left: t,
+                    impact_point: core::Point::new(x as i32, y as i32),
+                });
             }
         }
 
         //timeout elapsed, so no collision
-        return -1.0
+        None
     }
 }
 
@@ -113,4 +111,10 @@ struct ObjectInfo {
     position: core::Point,
     depth: f64,
     timestamp: Instant,
+}
+
+#[derive(Debug)]
+pub struct CollisionInfo {
+    pub time_left: f64,
+    pub impact_point: core::Point,
 }
