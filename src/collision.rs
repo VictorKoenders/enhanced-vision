@@ -1,16 +1,10 @@
 use opencv::{
+    core, imgproc,
     prelude::*,
-    core,
-    imgproc,
-    types::{
-        VectorOfPoint,
-        VectorOfVectorOfPoint,
-    },
+    types::{VectorOfPoint, VectorOfVectorOfPoint},
 };
 
-use std::{
-    time::Instant,
-};
+use std::time::Instant;
 
 pub struct CollisionDetector {
     previous_shapes: Vec<ObjectInfo>,
@@ -18,44 +12,62 @@ pub struct CollisionDetector {
     height: f64,
 }
 
+const CONTOURS_MATCH_I1: i32 = 1;
+
+fn moments(_shape: &VectorOfPoint, _b: bool) -> opencv::core::Moments {
+    todo!("Seems to be missing in the opencv docs?")
+}
+
 impl CollisionDetector {
     pub fn new(width: f64, height: f64) -> CollisionDetector {
         CollisionDetector {
             previous_shapes: Vec::new(),
-            width: width,
-            height: height,
+            width,
+            height,
         }
     }
 
     //origin is the location where the distance sensor measures
-    pub fn feed_depth_map(&mut self, depth_map: &core::Mat, origin_value: f64, origin_depth: f64) -> opencv::Result<Option<CollisionInfo>> {
+    pub fn feed_depth_map(
+        &mut self,
+        depth_map: &core::Mat,
+        origin_value: f64,
+        origin_depth: f64,
+    ) -> opencv::Result<Option<CollisionInfo>> {
         //find_contours is made to detect white-on-black contours, so do an edge detection first
         let mut visual = Mat::default()?;
         //CV_U8 not defined for some reason... need to convert because canny expects an 8 bit single channel image
         depth_map.convert_to(&mut visual, /*core::CV_U8*/ 0, 1.0, 0.0)?;
 
         let mut edges = Mat::default()?;
-        imgproc::canny(&mut visual, &mut edges, 100.0, 200.0, 3, false)?;
+        imgproc::canny(&visual, &mut edges, 100.0, 200.0, 3, false)?;
 
         let mut contours = VectorOfVectorOfPoint::new();
-        imgproc::find_contours(&mut edges, &mut contours, imgproc::RETR_TREE, imgproc::CHAIN_APPROX_SIMPLE, core::Point::default())?;
+        imgproc::find_contours(
+            &mut edges,
+            &mut contours,
+            imgproc::RETR_TREE,
+            imgproc::CHAIN_APPROX_SIMPLE,
+            core::Point::default(),
+        )?;
 
         for contour in contours {
             let mut shape = VectorOfPoint::new();
             imgproc::approx_poly_dp(&contour, &mut shape, 2.6, true)?;
-            let m = imgproc::moments(shape, false);
+            let m = moments(&shape, false);
             //calculate shape 'center of mass' from moments
-            let position = core::Point::new(m.m10 / m.m00, m.m01 / m.m00);
+            let position = core::Point::new((m.m10 / m.m00) as _, (m.m01 / m.m00) as _);
             let new = ObjectInfo {
-                shape: shape,
-                position: position,
-                depth: (depth_map.at_2d(position.x, position.y)? / origin_value) * origin_depth,
+                shape,
+                position,
+                depth: (depth_map.at_2d::<f64>(position.x, position.y)? / origin_value)
+                    * origin_depth,
                 timestamp: Instant::now(),
             };
 
             for old in &self.previous_shapes {
                 //if shape is 95% similar or better
-                if imgproc::match_shapes(&old.shape, &new.shape, imgproc::CONTOURS_MATCH_I1, 0.0)? >= 0.95 {
+                if imgproc::match_shapes(&old.shape, &new.shape, CONTOURS_MATCH_I1, 0.0)? >= 0.95 {
                     return Ok(self.test_collision(old, &new));
                 }
             }
@@ -75,10 +87,10 @@ impl CollisionDetector {
             return None;
         }
 
-        let t = 0.0;
-        let x = old.position.x as f64;
-        let y = old.position.y as f64;
-        let z = old.depth;
+        let mut t = 0.0;
+        let mut x;
+        let mut y;
+        let mut z;
 
         //timeout of 5 seconds
         while t < 5.0 {
@@ -86,12 +98,10 @@ impl CollisionDetector {
             x = delta_x * t;
             y = delta_y * t;
             z = delta_z * t;
-            
             //if the object ends up outside our vision, assume it doesn't collide
             if x < 0.0 || x > self.width || y < 0.0 || y > self.height {
-                break
+                break;
             }
-            
             //apparantely the object will stay inside our vision when it reaches depth 0, i.e. it hits the screen
             if z <= 0.0 {
                 return Some(CollisionInfo {

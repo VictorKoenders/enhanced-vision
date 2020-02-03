@@ -1,37 +1,25 @@
 use opencv::{
-    prelude::*,
+    core::{Mat, Point},
     highgui,
-    core,
-    core::{
-        Point,
-        Mat,
-    },
 };
 
-use std::{
-    sync::mpsc,
-    thread,
-};
+use std::{sync::mpsc, thread};
 
+mod collision;
 mod distance;
 mod stereo;
-mod collision;
+use self::collision::CollisionDetector;
 use self::distance::UltrasonicSensor;
 use self::stereo::StereoView;
-use self::collision::CollisionDetector;
 
 const PIN_TRIG: u32 = 14;
 const PIN_ECHO: u32 = 15;
 
-fn main() {
-    run().unwrap();
-}
-
-fn run() -> opencv::Result<()> {
+fn main() -> opencv::Result<()> {
     let window_title = "enhanced-vision";
     highgui::named_window(window_title, highgui::WINDOW_AUTOSIZE)?;
 
-    let stereobm = StereoView::new(0, 5).unwrap();
+    let mut stereobm = StereoView::new(0, 5).unwrap();
 
     let mut origin_depth = 0.0;
     let sonic = UltrasonicSensor::new(PIN_TRIG, PIN_ECHO).unwrap();
@@ -41,7 +29,7 @@ fn run() -> opencv::Result<()> {
         loop {
             let dist = sonic.poll().unwrap();
             // only fails if the receiving end is dropped, in which case we should stop
-            if let Err(_) = tx.send(dist) {
+            if tx.send(dist).is_err() {
                 break;
             }
         }
@@ -50,11 +38,9 @@ fn run() -> opencv::Result<()> {
     let view_size = stereobm.get_view_size()?;
     let depth_point = Point::new((view_size[0] / 2.0) as i32, (view_size[1] * 0.2) as i32);
     let mut collide = CollisionDetector::new(view_size[0], view_size[1]);
-    
     loop {
-        match rx.try_recv() {
-            Ok(val) => origin_depth = val,
-            Err(_) => (),
+        if let Ok(val) = rx.try_recv() {
+            origin_depth = val;
         }
 
         let mut depth = Mat::default()?;
@@ -71,6 +57,4 @@ fn run() -> opencv::Result<()> {
 
         highgui::imshow(window_title, &visual)?;
     }
-
-    Ok(())
 }
